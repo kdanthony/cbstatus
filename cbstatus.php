@@ -15,17 +15,26 @@ specifics such as callerid name is to listen to AMI events.
 
 Depends on PAMI (https://github.com/marcelog/PAMI)
 
+Included Confbridge*Event.php files need to go in:
+$PEAR/PAMI/Message/Event
+
+Included Confbridge*Action.php files need to go in:
+$PEAR/PAMI/Message/Action
+
+ConfBridge Mute/UnMute events in Asterisk 10/11 require patch at
+https://issues.asterisk.org/jira/browse/ASTERISK-20827
+
 Copyright (c) 2013, Kevin Anthony (kevin@anthonynet.org
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met: 
+modification, are permitted provided that the following conditions are met:
 
 1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer. 
+   list of conditions and the following disclaimer.
 2. Redistributions in binary form must reproduce the above copyright notice,
    this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution. 
+   and/or other materials provided with the distribution.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -44,19 +53,21 @@ require_once '/opt/cbstatus/config.php';
 
 // Dependencies
 require_once 'log4php/Logger.php';
-require_once 'PAMI/Autoloader/Autoloader.php';  
+require_once 'PAMI/Autoloader/Autoloader.php';
 
-PAMI\Autoloader\Autoloader::register();  
-use PAMI\Client\Impl\ClientImpl as PamiClient;  
-use PAMI\Message\Event\EventMessage;  
-use PAMI\Listener\IEventListener;  
+PAMI\Autoloader\Autoloader::register();
+use PAMI\Client\Impl\ClientImpl as PamiClient;
+use PAMI\Message\Event\EventMessage;
+use PAMI\Listener\IEventListener;
 use PAMI\Message\Action\ConfbridgeListAction;
 use PAMI\Message\Action\ConfbridgeListRoomsAction;
 use PAMI\Message\Event\ConfbridgeStartEvent;
 use PAMI\Message\Event\ConfbridgeEndEvent;
-use PAMI\Message\Event\ConfbridgeJoinEvent;  
+use PAMI\Message\Event\ConfbridgeJoinEvent;
 use PAMI\Message\Event\ConfbridgeLeaveEvent;
 use PAMI\Message\Event\ConfbridgeTalkingEvent;
+use PAMI\Message\Event\ConfbridgeMuteEvent;
+use PAMI\Message\Event\ConfbridgeUnmuteEvent;
 
 // Setup logging
 Logger::configure('/opt/cbstatus/log4php.properties');
@@ -77,7 +88,7 @@ function sig_handler($signo){
 	if ($signo == SIGTERM || $signo == SIGHUP || $signo == SIGINT) {
 		if ($pids) {
 			// Pass on signals, not really needed here as the parent exits but being a good pid anyway.
-			foreach($pids as $p){ posix_kill($p,$signo); } 
+			foreach($pids as $p){ posix_kill($p,$signo); }
 
 			foreach($pids as $p){ pcntl_waitpid($p,$status); }
 		}
@@ -94,16 +105,16 @@ pcntl_signal(SIGHUP,  "sig_handler");
 pcntl_signal(SIGINT, "sig_handler");
 pcntl_signal(SIGUSR1, "sig_handler");
 
-$pamiClientOptions = array(  
-    'log4php.properties' => __DIR__ . '/log4php.properties', 
-    'host' => $ami_host,  
-    'scheme' => 'tcp://',  
-    'port' => $ami_port,  
-    'username' => $ami_user,  
-    'secret' => $ami_secret,  
-    'connect_timeout' => 10000,  
-    'read_timeout' => 10000  
-);  
+$pamiClientOptions = array(
+    'log4php.properties' => __DIR__ . '/log4php.properties',
+    'host' => $ami_host,
+    'scheme' => 'tcp://',
+    'port' => $ami_port,
+    'username' => $ami_user,
+    'secret' => $ami_secret,
+    'connect_timeout' => 10000,
+    'read_timeout' => 10000
+);
 
 $log->info("Starting..");
 
@@ -114,8 +125,8 @@ if ( $db->connect_errno > 0 ) {
 	die('Unable to connect to database [' . $db->connect_error . ']');
 }
 
-$pamiClient = new PamiClient($pamiClientOptions);  
-$pamiClient->open(); 
+$pamiClient = new PamiClient($pamiClientOptions);
+$pamiClient->open();
 
 // Since we have no idea what the current state is, purge it all
 $log->info("Purging existing data...");
@@ -133,7 +144,7 @@ if ($response->isSuccess()) {
 			$event_conference = $event->getConference();
 			$log->info("Found conference $event_conference");
 
-			$response2 = $pamiClient->send(new ConfbridgeListAction($event_conference));		
+			$response2 = $pamiClient->send(new ConfbridgeListAction($event_conference));
 			if ($response2->isSuccess()) {
 				$part_events = $response2->getEvents();
 				foreach ( $part_events as $part_event ) {
@@ -185,8 +196,8 @@ $pamiClient->registerEventListener(
     }
 );
 
-$pamiClient->registerEventListener(  
-    function (EventMessage $event) {  
+$pamiClient->registerEventListener(
+    function (EventMessage $event) {
 	global $pamiClient;
 	global $log;
 	$conference   = $event->GetConference();
@@ -216,13 +227,13 @@ $pamiClient->registerEventListener(
 		}
 	}
 
-    },  
-    function (EventMessage $event) {  
-        return  
-            $event instanceof ConfbridgeJoinEvent  
-        ;  
-    }  
-);  
+    },
+    function (EventMessage $event) {
+        return
+            $event instanceof ConfbridgeJoinEvent
+        ;
+    }
+);
 
 $pamiClient->registerEventListener(
     function (EventMessage $event) {
@@ -238,6 +249,42 @@ $pamiClient->registerEventListener(
     function (EventMessage $event) {
         return
             $event instanceof ConfbridgeLeaveEvent
+        ;
+    }
+);
+
+$pamiClient->registerEventListener(
+    function (EventMessage $event) {
+        global $log;
+        $conference   = $event->GetConference();
+        $channel      = $event->GetChannel();
+        $uniqueid     = $event->GetUniqueid();
+        $calleridname = $event->GetCallerIDname();
+        $calleridnum  = $event->GetCallerIDnum();
+        $log->info("$calleridname ($calleridnum) ($uniqueid) muted on $conference via $channel");
+	updatemuted( $conference, $uniqueid, $channel, 'on' );
+    },
+    function (EventMessage $event) {
+        return
+            $event instanceof ConfbridgeMuteEvent
+        ;
+    }
+);
+
+$pamiClient->registerEventListener(
+    function (EventMessage $event) {
+        global $log;
+        $conference   = $event->GetConference();
+        $channel      = $event->GetChannel();
+        $uniqueid     = $event->GetUniqueid();
+        $calleridname = $event->GetCallerIDname();
+        $calleridnum  = $event->GetCallerIDnum();
+        $log->info("$calleridname ($calleridnum) ($uniqueid) unmuted on $conference via $channel");
+	updatemuted( $conference, $uniqueid, $channel, 'off' );
+    },
+    function (EventMessage $event) {
+        return
+            $event instanceof ConfbridgeUnmuteEvent
         ;
     }
 );
@@ -263,12 +310,12 @@ $pamiClient->registerEventListener(
     }
 );
 
-$running = true;  
+$running = true;
 $loopcount = 0;
 
-// Main execution loop  
-while($running) {  
-	$pamiClient->process();  
+// Main execution loop
+while($running) {
+	$pamiClient->process();
 	// Every 5 seconds or so make sure we are still connected to MySQL
 	if ($loopcount >= 5000) {
 		$log->debug("Checking our db connectivity");
@@ -280,16 +327,23 @@ while($running) {
 		}
 	}
 	$loopcount++;
-	usleep(1000); 
-}  
+	usleep(1000);
+}
 
-// Close the connection  
-$pamiClient->close();  
+// Close the connection
+$pamiClient->close();
 
 // Change the talker status
 function updatetalker( $conference, $uniqueid, $channel, $talkingstatus ) {
 	global $db;
 	$query = "UPDATE confbridge_status SET talking = \"$talkingstatus\" WHERE conference = \"$conference\" AND channel = \"$channel\"";
+	$result = $db->query( $query );
+}
+
+// Updates if a person is muted or unmuted
+function updatemuted( $conference, $uniqueid, $channel, $mutedstatus ) {
+	global $db;
+	$query = "UPDATE confbridge_status SET muted  = \"$mutedstatus\" WHERE conference = \"$conference\" AND channel = \"$channel\"";
 	$result = $db->query( $query );
 }
 
