@@ -13,7 +13,15 @@ Necessary due to the fact that confbridge does not report the same info
 in the list command as meetme did so only way to see talker and other
 specifics such as callerid name is to listen to AMI events.
 
-Depends on PAMI (https://github.com/marcelog/PAMI)
+Depends on PAMI (https://github.com/marcelog/PAMI) and Log4PHP
+(http://logging.apache.org/log4php/)
+
+If you don't mind PEAR, install the dependencies like so:
+
+pear channel-discover pear.apache.org/log4php
+pear install log4php/Apache_log4php
+pear channel-discover pear.marcelog.name
+pear install marcelog/PAMI
 
 Included Confbridge*Event.php files need to go in:
 $PEAR/PAMI/Message/Event
@@ -49,11 +57,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-require_once '/opt/cbstatus/config.php';
+date_default_timezone_set('America/New_York');
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
+if ( is_readable( 'config.php' ) ) {
+        include_once 'config.php';
+} else {
+        trigger_error( "Can't open config file", E_USER_ERROR );
+}
 
 // Dependencies
-require_once 'log4php/Logger.php';
-require_once 'PAMI/Autoloader/Autoloader.php';
+include_once 'log4php/Logger.php';
+include_once 'PAMI/Autoloader/Autoloader.php';
 
 PAMI\Autoloader\Autoloader::register();
 use PAMI\Client\Impl\ClientImpl as PamiClient;
@@ -70,7 +85,9 @@ use PAMI\Message\Event\ConfbridgeMuteEvent;
 use PAMI\Message\Event\ConfbridgeUnmuteEvent;
 
 // Setup logging
-Logger::configure('/opt/cbstatus/log4php.properties');
+if ( is_readable( 'log4php.properties' ) ) {
+	Logger::configure('log4php.properties');
+}
 $log = Logger::getLogger('cbstatus');
 
 // Daemonize
@@ -118,15 +135,31 @@ $pamiClientOptions = array(
 
 $log->info("Starting..");
 
+// Shut up PHP so we can log errors instead
+//error_reporting( 0 );
+
 $db = new mysqli( $db_host, $db_user, $db_pass, $db_name );
 
 if ( $db->connect_errno > 0 ) {
-	$log->error("Unable to connect to database: $db->connect_error");
-	die('Unable to connect to database [' . $db->connect_error . ']');
+	$log->error( "Unable to connect to database: $db->connect_error" );
+	exit( 1 );
 }
 
-$pamiClient = new PamiClient($pamiClientOptions);
-$pamiClient->open();
+$result = $db->query( "SHOW TABLES LIKE 'confbridge_status'" );
+if ( mysqli_num_rows( $result ) != 1 ) {
+	$log->error( "Cannot find confbridge_status table in schema, cannot proceed." );
+	exit( 1 );
+} 
+
+try {
+	$pamiClient = new PamiClient($pamiClientOptions);
+	$pamiClient->open();
+} catch ( Exception $e ) {
+	//throw $e;
+	$log->error( "Could not connect to AMI at $ami_host:$ami_port .. Restarting and trying again in 10 seconds" );
+	sleep( 10 );
+	pcntl_exec( $_SERVER['_'] );
+}
 
 // Since we have no idea what the current state is, purge it all
 $log->info("Purging existing data...");
@@ -164,7 +197,7 @@ if ($response->isSuccess()) {
 } else {
 	// Something went wrong, though it's possible there were just no bridges
 	// TODO: Handle no bridges better
-	$log->warn("There was a problem connecting the active conferences");
+	$log->warn("There was a problem collecting the active conferences");
 }
 
 $log->info("Starting the event listeners");
@@ -315,7 +348,13 @@ $loopcount = 0;
 
 // Main execution loop
 while($running) {
-	$pamiClient->process();
+	try {
+		$pamiClient->process();
+	} catch ( Exception $e ) {
+        	$log->error( "Could not process AMI events from $ami_host:$ami_port, possibly disconnected.. Restarting and trying again in 10 seconds" );
+		sleep( 10 );
+		pcntl_exec( $_SERVER['_'] );
+	}
 	// Every 5 seconds or so make sure we are still connected to MySQL
 	if ($loopcount >= 5000) {
 		$log->debug("Checking our db connectivity");
@@ -323,7 +362,7 @@ while($running) {
 		if ($db->ping()) {
 			$log->debug("Connectivity to db is ok");
 		} else {
-			$log->error("Lost connectivity to database");
+			$log->error("Cannot communicate with database");
 		}
 	}
 	$loopcount++;
@@ -374,7 +413,7 @@ function purgeconference( $conference ) {
 function purgeallconferences( ){
         global $db;
         $query = "DELETE FROM confbridge_status";
-        $result = $db->query( $query );
+	$result = $db->query( $query );
 }
 
 // Mark callers as admin or not for display purposes
