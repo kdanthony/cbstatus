@@ -14,10 +14,10 @@ Depends on PAMI (https://github.com/marcelog/PAMI) and Log4PHP
 
 If you don't mind PEAR, install the dependencies like so:
 
-pear channel-discover pear.apache.org/log4php
-pear install log4php/Apache_log4php
-pear channel-discover pear.marcelog.name
-pear install marcelog/PAMI
+* pear channel-discover pear.apache.org/log4php
+* pear install log4php/Apache_log4php
+* pear channel-discover pear.marcelog.name
+* pear install marcelog/PAMI
 
 Included Confbridge AMI Event files need to go in:
 $PEAR/PAMI/Message/Event
