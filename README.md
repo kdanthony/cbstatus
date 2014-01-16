@@ -9,7 +9,15 @@ Necessary due to the fact that ConfBridge does not report the same info
 in the list command as meetme did so only way to see talker and other
 specifics such as callerid name is to listen to AMI events.
 
-Depends on PAMI (https://github.com/marcelog/PAMI)
+Depends on PAMI (https://github.com/marcelog/PAMI) and Log4PHP
+(http://logging.apache.org/log4php/)
+
+If you don't mind PEAR, install the dependencies like so:
+
+pear channel-discover pear.apache.org/log4php
+pear install log4php/Apache_log4php
+pear channel-discover pear.marcelog.name
+pear install marcelog/PAMI
 
 Included Confbridge AMI Event files need to go in:
 $PEAR/PAMI/Message/Event
