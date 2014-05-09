@@ -57,7 +57,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-date_default_timezone_set('America/New_York');
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 if ( is_readable( 'config.php' ) ) {
@@ -65,6 +64,8 @@ if ( is_readable( 'config.php' ) ) {
 } else {
         trigger_error( "Can't open config file", E_USER_ERROR );
 }
+
+date_default_timezone_set($timezone);
 
 // Dependencies
 include_once 'log4php/Logger.php';

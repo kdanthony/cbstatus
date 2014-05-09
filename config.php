@@ -1,5 +1,9 @@
 <?php
 
+// Global
+
+$timezone = 'Europe/Berlin';
+
 // Database
 
 $db_name = 'dbname';
