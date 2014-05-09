@@ -68,8 +68,8 @@ if ( is_readable( 'config.php' ) ) {
 date_default_timezone_set($timezone);
 
 // Dependencies
-include_once 'log4php/Logger.php';
-include_once 'PAMI/Autoloader/Autoloader.php';
+require_once 'log4php/Logger.php';
+require_once 'PAMI/Autoloader/Autoloader.php';
 
 PAMI\Autoloader\Autoloader::register();
 use PAMI\Client\Impl\ClientImpl as PamiClient;
